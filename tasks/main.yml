@@ -1,0 +1,60 @@
+---
+
+- block:
+  - name: ssh-keyscan
+    delegate_to: "{{ known_hosts_bastion }}"
+    shell: ssh-keyscan -p "{{ target_port }}" "{{ target_host }}"
+    register: ssh_keyscan
+    # fail if empty (rc == 0 when hostname is not known)
+    failed_when: not ssh_keyscan.stdout
+    check_mode: false
+    changed_when: false
+
+  # perform the update if forced, else collect needed changes
+  - name: known_hosts
+    check_mode: "{{ false if known_hosts_force_update else true }}"
+    delegate_to: "{{ known_hosts_host }}"
+    known_hosts:
+      key: "{{ item }}"
+      name: "{{ target_host }}"
+      path: "{{ known_hosts_path }}"
+    with_items: "{{ ssh_keyscan.stdout_lines }}"
+    register: update
+
+  - name: prompt
+    when: update.changed and not known_hosts_force_update
+    run_once: true
+    pause:
+      prompt: |
+        #jinja2: lstrip_blocks: True
+        Following entries must be added/updated:
+        {% for host in play_hosts %}
+        {% if hostvars[host].update.changed %}
+        {{ host }}
+
+          {% for line in hostvars[host].update.results %}
+            {% if line.changed %}
+            {{ line.invocation.module_args.key }}
+            {% endif %}
+          {% endfor %}
+
+        {% endif %}
+        {% endfor %}
+        
+        Type YES if you want to apply the changes
+        (ctrl+c then (a)bort if you want to interrupt the whole play)
+    register: prompt
+
+  - name: known_hosts
+    when: update.changed and not known_hosts_force_update and prompt.user_input == 'YES'
+    delegate_to: "{{ known_hosts_host }}"
+    known_hosts:
+      key: "{{ item }}"
+      name: "{{ target_host }}"
+      path: "{{ known_hosts_path }}"
+    with_items: "{{ ssh_keyscan.stdout_lines }}"
+    register: update
+
+  vars:
+    target_host: "{{ hostvars[inventory_hostname]['ansible_host'] | default(inventory_hostname) }}"
+    target_port: "{{ hostvars[inventory_hostname]['ansible_port'] | default(22) }}"

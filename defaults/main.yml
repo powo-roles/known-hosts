@@ -1,0 +1,6 @@
+---
+
+known_hosts_bastion: localhost
+known_hosts_host: localhost
+known_hosts_path: "{{ '~/.ssh/known_hosts' | expanduser }}"
+known_hosts_force_update: false
